@@ -4,7 +4,7 @@ import exiftool
 import copy
 from dateutil import parser, relativedelta
 import os
-
+from moviepy.editor import ColorClip
 
 supported_extensions = ['.MTS']
 
@@ -69,14 +69,21 @@ def times_does_overalp(movie_file_1, movie_file_2):
         return movie_file_2['synchronize_time'] + movie_file_2['duration'] > movie_file_1['synchronize_time']
 
 
-def rename_and_pad(matched_file_groups):
+def rename_and_pad(matched_file_groups, base_directory, secondary_directory):
     for i, matched_file_group in enumerate(matched_file_groups):
+        print(i, matched_file_group)
         if matched_file_group[0]:
             _, extension = os.path.splitext(matched_file_group[0])
             os.rename(matched_file_group[0], os.path.join(os.path.dirname(matched_file_group[0]), f'{i}{extension}'))
+        else:
+            clip = ColorClip((640, 480), color= (0, 0, 0), duration= 1)
+            clip.write_videofile(os.path.join(os.path.join(base_directory, f'{i}.mp4')), fps=24)
         if matched_file_group[1]:
             _, extension = os.path.splitext(matched_file_group[1])
             os.rename(matched_file_group[1], os.path.join(os.path.dirname(matched_file_group[1]), f'{i}{extension}'))
+        else:
+            clip = ColorClip((640, 480), color= (0, 0, 0), duration= 1)
+            clip.write_videofile(os.path.join(os.path.join(secondary_directory, f'{i}.mp4')), fps=24)
 
 
 def synchronize_folders(base_directory, base_synchronize_index, base_offset,
@@ -96,20 +103,21 @@ def synchronize_folders(base_directory, base_synchronize_index, base_offset,
     secondary_movie_files.sort(key=lambda movie_file: movie_file['synchronize_time'])
 
     matched_file_groups = synchronize_angles(base_movie_files, secondary_movie_files)
-    rename_and_pad(matched_file_groups)
+    rename_and_pad(matched_file_groups, base_directory, secondary_directory)
 
 
 if __name__ == '__main__':
     # Parameter should be baseDirectory baseSynchronizeIndex baseOffset secondaryDirectory secondarySynchronizeIndex secondaryOffset
-    base_directory = sys.argv[1]
-    base_sync_index = sys.argv[2]
-    base_offset = sys.argv[3]
+    try:
+        base_directory = sys.argv[1]
+        base_sync_index = sys.argv[2]
+        base_offset = sys.argv[3]
 
-    secondary_directory = sys.argv[4]
-    secondary_sync_index = sys.argv[5]
-    secondary_offset = sys.argv[6]
-
-    synchronize_folders(r"C:\Users\AcePl\Desktop\Wide", 0, 10, r"C:\Users\AcePl\Desktop\Tight", 0, 0)
+        secondary_directory = sys.argv[4]
+        secondary_sync_index = sys.argv[5]
+        secondary_offset = sys.argv[6]
+    except IndexError:
+        synchronize_folders(r"C:\Users\AcePl\Desktop\Wide", 0, 10, r"C:\Users\AcePl\Desktop\Tight", 0, 0)
 
 
 
