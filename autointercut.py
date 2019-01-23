@@ -4,9 +4,10 @@ import exiftool
 import copy
 from dateutil import parser, relativedelta
 import os
-from moviepy.editor import ColorClip
+import shutil
 
 supported_extensions = ['.MTS']
+blank_movie_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'blank.mp4')
 
 
 def get_tag_value(tag, metadata):
@@ -14,6 +15,7 @@ def get_tag_value(tag, metadata):
         if tag in full_tag:
             return value
     raise ValueError(f'{tag} not within metadata tags.')
+
 
 def to_seconds(relative_delta):
     return relative_delta.seconds + relative_delta.minutes * 60 + relative_delta.hours * 3600
@@ -74,16 +76,26 @@ def rename_and_pad(matched_file_groups, base_directory, secondary_directory):
         print(i, matched_file_group)
         if matched_file_group[0]:
             _, extension = os.path.splitext(matched_file_group[0])
-            os.rename(matched_file_group[0], os.path.join(os.path.dirname(matched_file_group[0]), f'{i}{extension}'))
+            os.rename(matched_file_group[0], os.path.join(os.path.dirname(matched_file_group[0]), get_sync_name(i, extension)))
         else:
-            clip = ColorClip((640, 480), color= (0, 0, 0), duration= 1)
-            clip.write_videofile(os.path.join(os.path.join(base_directory, f'{i}.mp4')), fps=24)
+            shutil.copyfile(blank_movie_path, os.path.join(os.path.join(base_directory, get_sync_name(i, '.mp4'))))
         if matched_file_group[1]:
             _, extension = os.path.splitext(matched_file_group[1])
-            os.rename(matched_file_group[1], os.path.join(os.path.dirname(matched_file_group[1]), f'{i}{extension}'))
+            os.rename(matched_file_group[1], os.path.join(os.path.dirname(matched_file_group[1]), get_sync_name(i, extension)))
         else:
-            clip = ColorClip((640, 480), color= (0, 0, 0), duration= 1)
-            clip.write_videofile(os.path.join(os.path.join(secondary_directory, f'{i}.mp4')), fps=24)
+            shutil.copyfile(blank_movie_path, os.path.join(os.path.join(secondary_directory, get_sync_name(i, '.mp4'))))
+
+
+def get_sync_name(index, extension):
+    index += 1
+    if index < 10:
+        return f'000{index}{extension}'
+    elif index < 100:
+        return f'00{index}{extension}'
+    elif index < 1000:
+        return f'0{index}{extension}'
+    else:
+        return f'{index}{extension}'
 
 
 def synchronize_folders(base_directory, base_synchronize_index, base_offset,
@@ -97,10 +109,14 @@ def synchronize_folders(base_directory, base_synchronize_index, base_offset,
     base_movie_files = with_synchronized_time(base_movie_files[base_synchronize_index]['datetime'],
                                               base_offset, base_movie_files)
     base_movie_files.sort(key=lambda movie_file: movie_file['synchronize_time'])
+    for movie in base_movie_files:
+        print(movie)
 
     secondary_movie_files = with_synchronized_time(secondary_movie_files[secondary_synchronize_index]['datetime'],
                                                    seconadry_offset, secondary_movie_files)
     secondary_movie_files.sort(key=lambda movie_file: movie_file['synchronize_time'])
+    for movie in secondary_movie_files:
+        print(movie)
 
     matched_file_groups = synchronize_angles(base_movie_files, secondary_movie_files)
     rename_and_pad(matched_file_groups, base_directory, secondary_directory)
