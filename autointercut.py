@@ -7,15 +7,16 @@ import os
 import shutil
 import subprocess
 
-supported_extensions = ['.MTS']
-blank_movie_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'blank.mp4')
+SUPPORTED_EXTENSIONS = ['.MTS', '.MP4']
+DATETIME_TAGS = ['DateTimeOriginal', 'CreateDate', 'FileCreateDate']
+BLANK_MOVIE_PATH = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'blank.mp4')
 
 
 def get_tag_value(tag, metadata):
     for full_tag, value in metadata.items():
         if tag in full_tag:
             return value
-    raise ValueError(f'{tag} not within metadata tags.')
+    return None
 
 
 def to_seconds(relative_delta):
@@ -23,19 +24,29 @@ def to_seconds(relative_delta):
 
 
 def get_movie_file_from_directory(directory):
-    return [f'{os.path.join(directory, filename)}{file_extension}'
+    return [{'file_path': f'{os.path.join(directory, filename)}{file_extension}'}
             for filename, file_extension in [os.path.splitext(item_path) for item_path in os.listdir(directory)]
-            if file_extension.upper() in supported_extensions]
+            if file_extension.upper() in SUPPORTED_EXTENSIONS]
 
 
-def parse_exif_batch(metadata_batch):
-    return [
-        {
-            'file_path': get_tag_value('SourceFile', metadata),
-            'datetime': parser.parse(get_tag_value('DateTimeOriginal', metadata)),
-        }
-        for metadata in metadata_batch
-    ]
+def with_datetime(movie_files):
+    movie_files = copy.deepcopy(movie_files)
+
+    with exiftool.ExifTool() as et:
+        for movie_file in movie_files:
+            metadata = et.get_tags(DATETIME_TAGS, movie_file['file_path'])
+
+            for tag in DATETIME_TAGS:
+                datetime = get_tag_value(tag, metadata)
+                if datetime != None:
+                    break
+
+            if datetime == None:
+                raise ValueError('Couldn\'t get a datetime for {movie_file["file_path"]}')
+
+            movie_file['datetime'] = parser.parse(datetime)
+    return movie_files
+
 
 def with_duration(movie_files):
     movie_files = copy.deepcopy(movie_files)
@@ -45,6 +56,7 @@ def with_duration(movie_files):
         duration = float(duration)
         movie_file['duration'] = duration
     return movie_files
+
 
 def with_synchronized_time(synchronize_datetime, offset, movie_files):
     movie_files = copy.deepcopy(movie_files)
@@ -94,36 +106,33 @@ def rename_and_pad(matched_file_groups, base_directory, secondary_directory):
             _, extension = os.path.splitext(matched_file_group[0])
             os.rename(matched_file_group[0], os.path.join(os.path.dirname(matched_file_group[0]), get_sync_name(i, extension)))
         else:
-            shutil.copyfile(blank_movie_path, os.path.join(os.path.join(base_directory, get_sync_name(i, '.mp4'))))
+            shutil.copyfile(BLANK_MOVIE_PATH, os.path.join(os.path.join(base_directory, get_sync_name(i, '.mp4'))))
         if matched_file_group[1]:
             _, extension = os.path.splitext(matched_file_group[1])
             os.rename(matched_file_group[1], os.path.join(os.path.dirname(matched_file_group[1]), get_sync_name(i, extension)))
         else:
-            shutil.copyfile(blank_movie_path, os.path.join(os.path.join(secondary_directory, get_sync_name(i, '.mp4'))))
+            shutil.copyfile(BLANK_MOVIE_PATH, os.path.join(os.path.join(secondary_directory, get_sync_name(i, '.mp4'))))
 
 
 def get_sync_name(index, extension):
     index += 1
     if index < 10:
-        return f'000{index}{extension}'
+        return f'aic000{index}{extension}'
     elif index < 100:
-        return f'00{index}{extension}'
+        return f'aic00{index}{extension}'
     elif index < 1000:
-        return f'0{index}{extension}'
+        return f'aic0{index}{extension}'
     else:
-        return f'{index}{extension}'
+        return f'aic{index}{extension}'
 
 
-def synchronize_folders(base_directory, base_synchronize_index, base_offset,
-                        secondary_directory, secondary_synchronize_index, seconadry_offset):
+def movie_from_directories(base_directory, base_synchronize_index, base_offset,
+                        secondary_directory, secondary_synchronize_index, secondary_offset):
+    base_movie_files = get_movie_file_from_directory(base_directory)
+    secondary_movie_files = get_movie_file_from_directory(secondary_directory)
 
-    base_movie_file_paths = get_movie_file_from_directory(base_directory)
-    secondary_movie_file_paths = get_movie_file_from_directory(secondary_directory)
-    with exiftool.ExifTool() as et:
-        metadata_batch = et.get_tags_batch(['DateTimeOriginal'], base_movie_file_paths)
-        base_movie_files = parse_exif_batch(metadata_batch)
-        metadata_batch = et.get_tags_batch(['DateTimeOriginal'], secondary_movie_file_paths)
-        secondary_movie_files = parse_exif_batch(metadata_batch)
+    base_movie_files = with_datetime(base_movie_files)
+    secondary_movie_files = with_datetime(secondary_movie_files)
 
     base_movie_files = with_duration(base_movie_files)
     base_movie_files = with_synchronized_time(base_movie_files[base_synchronize_index]['datetime'],
@@ -134,27 +143,53 @@ def synchronize_folders(base_directory, base_synchronize_index, base_offset,
 
     secondary_movie_files = with_duration(secondary_movie_files)
     secondary_movie_files = with_synchronized_time(secondary_movie_files[secondary_synchronize_index]['datetime'],
-                                                   seconadry_offset, secondary_movie_files)
+                                                   secondary_offset, secondary_movie_files)
     secondary_movie_files.sort(key=lambda movie_file: movie_file['synchronize_time'])
     for movie in secondary_movie_files:
         print(movie)
 
+    return base_movie_files, secondary_movie_files
+
+def synchronize_cut_folders(base_directory, base_synchronize_index, base_offset,
+                        secondary_directory, secondary_synchronize_index, secondary_offset):
+    base_movie_files, secondary_movie_files = movie_from_directories(base_directory, base_synchronize_index, base_offset,
+                                                            secondary_directory, secondary_synchronize_index, secondary_offset)
     matched_file_groups = synchronize_angles(base_movie_files, secondary_movie_files)
     rename_and_pad(matched_file_groups, base_directory, secondary_directory)
 
+def auto_cut_secondary(base_directory, base_synchronize_index, base_offset,
+                        secondary_directory, secondary_synchronize_index, secondary_offset):
+    base_movie_files, secondary_movie_files = movie_from_directories(base_directory, base_synchronize_index, base_offset,
+                                                            secondary_directory, secondary_synchronize_index, secondary_offset)
+    print('now auto_cut')
+
 
 if __name__ == '__main__':
-    # Parameter should be baseDirectory baseSynchronizeIndex baseOffset secondaryDirectory secondarySynchronizeIndex secondaryOffset
+    # Parameter should be baseDirectory baseSynchronizeIndex baseOffset
+    # secondaryDirectory secondarySynchronizeIndex secondaryOffset option
     try:
         base_directory = sys.argv[1]
-        base_sync_index = sys.argv[2]
-        base_offset = sys.argv[3]
+        base_sync_index = int(sys.argv[2])
+        base_offset = int(sys.argv[3])
 
         secondary_directory = sys.argv[4]
-        secondary_sync_index = sys.argv[5]
-        secondary_offset = sys.argv[6]
+        secondary_sync_index = int(sys.argv[5])
+        secondary_offset = int(sys.argv[6])
+
+        option = sys.argv[7]
+
+        if option.upper() == 'SYNC_CUT_DIRS':
+            synchronize_cut_folders(base_directory, base_sync_index, base_offset,
+                                    secondary_directory, secondary_sync_index, secondary_offset)
+        elif option.upper() == 'AUTO_CUT_SEC':
+            auto_cut_secondary(base_directory, base_sync_index, base_offset,
+                                    secondary_directory, secondary_sync_index, secondary_offset)
+        else:
+            print('No proper option given for auto sync', file=sys.stderr)
+
+
     except IndexError:
-        synchronize_folders(r"C:\Users\AcePl\Desktop\Wide", 0, 10, r"C:\Users\AcePl\Desktop\Tight", 0, 0)
+        print('Incorrect arguments passed to autointercut.', file=sys.stderr)
 
 
 
