@@ -5,6 +5,7 @@ import copy
 from dateutil import parser, relativedelta
 import os
 import shutil
+import subprocess
 
 supported_extensions = ['.MTS']
 blank_movie_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'blank.mp4')
@@ -32,11 +33,18 @@ def parse_exif_batch(metadata_batch):
         {
             'file_path': get_tag_value('SourceFile', metadata),
             'datetime': parser.parse(get_tag_value('DateTimeOriginal', metadata)),
-            'duration': get_tag_value('Duration', metadata)
         }
         for metadata in metadata_batch
     ]
 
+def with_duration(movie_files):
+    movie_files = copy.deepcopy(movie_files)
+    for movie_file in movie_files:
+        cmd = ['ffprobe', '-i', movie_file['file_path'], '-show_entries', 'format=duration', '-v', 'quiet', '-of', 'csv=%s' % ("p=0")]
+        duration = subprocess.check_output(cmd)
+        duration = float(duration)
+        movie_file['duration'] = duration
+    return movie_files
 
 def with_synchronized_time(synchronize_datetime, offset, movie_files):
     movie_files = copy.deepcopy(movie_files)
@@ -51,6 +59,14 @@ def synchronize_angles(base_movie_files, secondary_movie_files):
     i = 0
     j = 0
     while i < len(base_movie_files) or j < len(secondary_movie_files):
+        if not i < len(base_movie_files):
+            matched_file_groups.append((None, secondary_movie_files[j]['file_path']))
+            j += 1
+            continue
+        if not j < len(secondary_movie_files):
+            matched_file_groups.append((base_movie_files[i]['file_path'], None))
+            i += 1
+            continue
         if times_does_overalp(base_movie_files[i], secondary_movie_files[j]):
             matched_file_groups.append((base_movie_files[i]['file_path'], secondary_movie_files[j]['file_path']))
             i += 1
@@ -100,18 +116,23 @@ def get_sync_name(index, extension):
 
 def synchronize_folders(base_directory, base_synchronize_index, base_offset,
                         secondary_directory, secondary_synchronize_index, seconadry_offset):
+
+    base_movie_file_paths = get_movie_file_from_directory(base_directory)
+    secondary_movie_file_paths = get_movie_file_from_directory(secondary_directory)
     with exiftool.ExifTool() as et:
-        metadata_batch = et.get_tags_batch(['DateTimeOriginal', 'Duration'], get_movie_file_from_directory(base_directory))
+        metadata_batch = et.get_tags_batch(['DateTimeOriginal'], base_movie_file_paths)
         base_movie_files = parse_exif_batch(metadata_batch)
-        metadata_batch = et.get_tags_batch(['DateTimeOriginal', 'Duration'], get_movie_file_from_directory(secondary_directory))
+        metadata_batch = et.get_tags_batch(['DateTimeOriginal'], secondary_movie_file_paths)
         secondary_movie_files = parse_exif_batch(metadata_batch)
 
+    base_movie_files = with_duration(base_movie_files)
     base_movie_files = with_synchronized_time(base_movie_files[base_synchronize_index]['datetime'],
                                               base_offset, base_movie_files)
     base_movie_files.sort(key=lambda movie_file: movie_file['synchronize_time'])
     for movie in base_movie_files:
         print(movie)
 
+    secondary_movie_files = with_duration(secondary_movie_files)
     secondary_movie_files = with_synchronized_time(secondary_movie_files[secondary_synchronize_index]['datetime'],
                                                    seconadry_offset, secondary_movie_files)
     secondary_movie_files.sort(key=lambda movie_file: movie_file['synchronize_time'])
