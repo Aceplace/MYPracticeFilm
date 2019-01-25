@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 SUPPORTED_EXTENSIONS = ['.MTS', '.MP4']
-DATETIME_TAGS = ['DateTimeOriginal', 'CreateDate', 'FileCreateDate']
+DATETIME_TAGS = ['DateTimeOriginal', 'CreateDate']
 BLANK_MOVIE_PATH = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'blank.mp4')
 
 
@@ -150,6 +150,7 @@ def movie_from_directories(base_directory, base_synchronize_index, base_offset,
 
     return base_movie_files, secondary_movie_files
 
+
 def synchronize_cut_folders(base_directory, base_synchronize_index, base_offset,
                         secondary_directory, secondary_synchronize_index, secondary_offset):
     base_movie_files, secondary_movie_files = movie_from_directories(base_directory, base_synchronize_index, base_offset,
@@ -157,11 +158,37 @@ def synchronize_cut_folders(base_directory, base_synchronize_index, base_offset,
     matched_file_groups = synchronize_angles(base_movie_files, secondary_movie_files)
     rename_and_pad(matched_file_groups, base_directory, secondary_directory)
 
+
 def auto_cut_secondary(base_directory, base_synchronize_index, base_offset,
                         secondary_directory, secondary_synchronize_index, secondary_offset):
     base_movie_files, secondary_movie_files = movie_from_directories(base_directory, base_synchronize_index, base_offset,
                                                             secondary_directory, secondary_synchronize_index, secondary_offset)
-    print('now auto_cut')
+
+    for i, base_movie in enumerate(base_movie_files):
+        bm_st = base_movie['synchronize_time']
+        bm_duration = base_movie['duration']
+        sm_st = secondary_movie_files[0]['synchronize_time']
+        sm_path = secondary_movie_files[0]['file_path']
+
+        if bm_st + bm_duration < sm_st:
+            shutil.copyfile(BLANK_MOVIE_PATH, os.path.join(os.path.join(secondary_directory, get_sync_name(i, '.mp4'))))
+        elif bm_st < sm_st and bm_st + bm_duration > sm_st:
+            subclip_duration = to_ffmpeg_duration(bm_st + bm_duration - sm_st)
+            subclip_name = os.path.join(secondary_directory, get_sync_name(i, os.path.splitext(sm_path)[1]))
+            subprocess.Popen(['ffmpeg', '-y', '-ss', '00:00:00', '-i', sm_path, '-c', 'copy', '-t', subclip_duration, subclip_name])
+        else:
+            subclip_duration = to_ffmpeg_duration(bm_duration)
+            subclip_start_time = to_ffmpeg_duration(bm_st - sm_st)
+            subclip_name = os.path.join(secondary_directory, get_sync_name(i, os.path.splitext(sm_path)[1]))
+            subprocess.Popen(['ffmpeg', '-y', '-ss', subclip_start_time, '-i', sm_path, '-c', 'copy', '-t', subclip_duration, subclip_name])
+
+
+def to_ffmpeg_duration(duration):
+    hours = int(duration // 3600)
+    minutes = int((duration - (hours * 3600)) // 60)
+    seconds = duration % 60
+    return f'{hours}:{minutes}:{seconds}'
+
 
 
 if __name__ == '__main__':
