@@ -1,117 +1,51 @@
 import sys
 
-import exiftool
-import copy
-from dateutil import parser, relativedelta
 import os
 import shutil
 import subprocess
 
-SUPPORTED_EXTENSIONS = ['.MTS', '.MP4']
-DATETIME_TAGS = ['DateTimeOriginal', 'CreateDate']
+from autointercututils import *
+
 BLANK_MOVIE_PATH = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'blank.mp4')
 
+class VideoClipGroup:
+    def __init__(self, directory, base_synchronize_index=0, base_offset=0):
+        self.directory = directory
+        self.clips = []
 
-def get_tag_value(tag, metadata):
-    for full_tag, value in metadata.items():
-        if tag in full_tag:
-            return value
-    return None
-
-
-def to_seconds(relative_delta):
-    return relative_delta.seconds + relative_delta.minutes * 60 + relative_delta.hours * 3600
-
-
-def get_movie_file_from_directory(directory):
-    return [{'file_path': f'{os.path.join(directory, filename)}{file_extension}'}
-            for filename, file_extension in [os.path.splitext(item_path) for item_path in os.listdir(directory)]
-            if file_extension.upper() in SUPPORTED_EXTENSIONS]
+        self.clips = get_movie_file_paths(directory)
+        self.clips = with_datetime(self.clips)
+        self.clips = with_duration(self.clips)
+        self.clips = with_synchronized_time(self.clips, self.clips[base_synchronize_index]['datetime'], base_offset)
+        self.clips.sort(key=lambda movie_file: movie_file['synchronize_time'])
 
 
-def with_datetime(movie_files):
-    movie_files = copy.deepcopy(movie_files)
-
-    with exiftool.ExifTool() as et:
-        for movie_file in movie_files:
-            metadata = et.get_tags(DATETIME_TAGS, movie_file['file_path'])
-
-            for tag in DATETIME_TAGS:
-                datetime = get_tag_value(tag, metadata)
-                if datetime != None:
-                    break
-
-            if datetime == None:
-                raise ValueError('Couldn\'t get a datetime for {movie_file["file_path"]}')
-
-            movie_file['datetime'] = parser.parse(datetime)
-    return movie_files
-
-
-def with_duration(movie_files):
-    movie_files = copy.deepcopy(movie_files)
-    for movie_file in movie_files:
-        cmd = ['ffprobe', '-i', movie_file['file_path'], '-show_entries', 'format=duration', '-v', 'quiet', '-of', 'csv=%s' % ("p=0")]
-        duration = subprocess.check_output(cmd)
-        duration = float(duration)
-        movie_file['duration'] = duration
-    return movie_files
-
-
-def with_synchronized_time(synchronize_datetime, offset, movie_files):
-    movie_files = copy.deepcopy(movie_files)
-    for movie_file in movie_files:
-        rd = to_seconds(relativedelta.relativedelta(movie_file['datetime'], synchronize_datetime))
-        movie_file['synchronize_time'] = rd - offset
-    return movie_files
-
-
-def synchronize_angles(base_movie_files, secondary_movie_files):
-    matched_file_groups = []
+def get_synchronized_grouping(base_clip_group, secondary_clip_group):
+    base_clips = base_clip_group.clips
+    secondary_clips = secondary_clip_group.clips
+    matched_clip_pairs = []
     i = 0
     j = 0
-    while i < len(base_movie_files) or j < len(secondary_movie_files):
-        if not i < len(base_movie_files):
-            matched_file_groups.append((None, secondary_movie_files[j]['file_path']))
+    while i < len(base_clips) or j < len(secondary_clips):
+        if not i < len(base_clips):
+            matched_clip_pairs.append((None, secondary_clips[j]['file_path']))
             j += 1
             continue
-        if not j < len(secondary_movie_files):
-            matched_file_groups.append((base_movie_files[i]['file_path'], None))
+        if not j < len(secondary_clips):
+            matched_clip_pairs.append((base_clips[i]['file_path'], None))
             i += 1
             continue
-        if times_does_overalp(base_movie_files[i], secondary_movie_files[j]):
-            matched_file_groups.append((base_movie_files[i]['file_path'], secondary_movie_files[j]['file_path']))
+        if do_times_overlap(base_clips[i], secondary_clips[j]):
+            matched_clip_pairs.append((base_clips[i]['file_path'], secondary_clips[j]['file_path']))
             i += 1
             j += 1
-        elif base_movie_files[i]['synchronize_time'] < secondary_movie_files[j]['synchronize_time']:
-            matched_file_groups.append((base_movie_files[i]['file_path'], None))
+        elif base_clips[i]['synchronize_time'] < secondary_clips[j]['synchronize_time']:
+            matched_clip_pairs.append((base_clips[i]['file_path'], None))
             i += 1
         else:
-            matched_file_groups.append((None, secondary_movie_files[j]['file_path']))
+            matched_clip_pairs.append((None, secondary_clips[j]['file_path']))
             j += 1
-    return matched_file_groups
-
-
-def times_does_overalp(movie_file_1, movie_file_2):
-    if movie_file_1['synchronize_time'] < movie_file_2['synchronize_time']:
-        return movie_file_1['synchronize_time'] + movie_file_1['duration'] > movie_file_2['synchronize_time']
-    else:
-        return movie_file_2['synchronize_time'] + movie_file_2['duration'] > movie_file_1['synchronize_time']
-
-
-def rename_and_pad(matched_file_groups, base_directory, secondary_directory):
-    for i, matched_file_group in enumerate(matched_file_groups):
-        print(i, matched_file_group)
-        if matched_file_group[0]:
-            _, extension = os.path.splitext(matched_file_group[0])
-            os.rename(matched_file_group[0], os.path.join(os.path.dirname(matched_file_group[0]), get_sync_name(i, extension)))
-        else:
-            shutil.copyfile(BLANK_MOVIE_PATH, os.path.join(os.path.join(base_directory, get_sync_name(i, '.mp4'))))
-        if matched_file_group[1]:
-            _, extension = os.path.splitext(matched_file_group[1])
-            os.rename(matched_file_group[1], os.path.join(os.path.dirname(matched_file_group[1]), get_sync_name(i, extension)))
-        else:
-            shutil.copyfile(BLANK_MOVIE_PATH, os.path.join(os.path.join(secondary_directory, get_sync_name(i, '.mp4'))))
+    return matched_clip_pairs
 
 
 def get_sync_name(index, extension):
@@ -124,83 +58,81 @@ def get_sync_name(index, extension):
         return f'aic0{index}{extension}'
     else:
         return f'aic{index}{extension}'
+    
 
+def auto_sync_cut_folders(base_directory, base_synchronize_index, base_offset,
+                          secondary_directory, secondary_synchronize_index, secondary_offset, option='RENAME_AND_PAD'):
 
-def movie_from_directories(base_directory, base_synchronize_index, base_offset,
-                        secondary_directory, secondary_synchronize_index, secondary_offset):
-    base_movie_files = get_movie_file_from_directory(base_directory)
-    secondary_movie_files = get_movie_file_from_directory(secondary_directory)
+    base_clip_group = VideoClipGroup(base_directory, base_synchronize_index, base_offset)
+    secondary_clip_group = VideoClipGroup(secondary_directory, secondary_synchronize_index, secondary_offset)
+    matched_clip_pairs = get_synchronized_grouping(base_clip_group, secondary_clip_group)
 
-    base_movie_files = with_datetime(base_movie_files)
-    secondary_movie_files = with_datetime(secondary_movie_files)
+    if option == 'RENAME_AND_PAD':
+        output_dir = ''
+    else:
+        output_dir = 'output'
+        if not os.path.exists(os.path.join(base_directory, 'output')):
+            os.makedirs(os.path.join(base_directory, 'output'))
+        if not os.path.exists(os.path.join(secondary_directory, 'output')):
+            os.makedirs(os.path.join(secondary_directory, 'output'))
 
-    base_movie_files = with_duration(base_movie_files)
-    base_movie_files = with_synchronized_time(base_movie_files[base_synchronize_index]['datetime'],
-                                              base_offset, base_movie_files)
-    base_movie_files.sort(key=lambda movie_file: movie_file['synchronize_time'])
-    for movie in base_movie_files:
-        print(movie)
-
-    secondary_movie_files = with_duration(secondary_movie_files)
-    secondary_movie_files = with_synchronized_time(secondary_movie_files[secondary_synchronize_index]['datetime'],
-                                                   secondary_offset, secondary_movie_files)
-    secondary_movie_files.sort(key=lambda movie_file: movie_file['synchronize_time'])
-    for movie in secondary_movie_files:
-        print(movie)
-
-    return base_movie_files, secondary_movie_files
-
-
-def synchronize_cut_folders(base_directory, base_synchronize_index, base_offset,
-                        secondary_directory, secondary_synchronize_index, secondary_offset):
-    base_movie_files, secondary_movie_files = movie_from_directories(base_directory, base_synchronize_index, base_offset,
-                                                            secondary_directory, secondary_synchronize_index, secondary_offset)
-    matched_file_groups = synchronize_angles(base_movie_files, secondary_movie_files)
-    rename_and_pad(matched_file_groups, base_directory, secondary_directory)
+    for i, matched_clip_pair in enumerate(matched_clip_pairs):
+        if matched_clip_pair[0]:
+            _, extension = os.path.splitext(matched_clip_pair[0])
+            if option == 'RENAME_AND_PAD':
+                os.rename(matched_clip_pair[0], os.path.join(os.path.dirname(matched_clip_pair[0]), get_sync_name(i, extension)))
+            else:
+                shutil.copyfile(matched_clip_pair[0], os.path.join(base_directory, output_dir, get_sync_name(i, extension)))
+        else:
+            shutil.copyfile(BLANK_MOVIE_PATH, os.path.join(base_directory, output_dir, get_sync_name(i, '.mp4')))
+        if matched_clip_pair[1]:
+            _, extension = os.path.splitext(matched_clip_pair[1])
+            if option == 'RENAME_AND_PAD':
+                os.rename(matched_clip_pair[1], os.path.join(os.path.dirname(matched_clip_pair[1]), get_sync_name(i, extension)))
+            else:
+                shutil.copyfile(matched_clip_pair[1], os.path.join(secondary_directory, output_dir, get_sync_name(i, extension)))
+        else:
+            shutil.copyfile(BLANK_MOVIE_PATH, os.path.join(secondary_directory, output_dir, get_sync_name(i, '.mp4')))
 
 
 def auto_cut_secondary(base_directory, base_synchronize_index, base_offset,
                         secondary_directory, secondary_synchronize_index, secondary_offset):
-    base_movie_files, secondary_movie_files = movie_from_directories(base_directory, base_synchronize_index, base_offset,
-                                                            secondary_directory, secondary_synchronize_index, secondary_offset)
+
+    base_clip_group = VideoClipGroup(base_directory, base_synchronize_index, base_offset)
+    secondary_clip_group = VideoClipGroup(secondary_directory, secondary_synchronize_index, secondary_offset)
+
+    base_clips = base_clip_group.clips
+    secondary_clips = secondary_clip_group.clips
+
+    if not os.path.exists(os.path.join(secondary_directory, 'output')):
+        os.makedirs(os.path.join(secondary_directory, 'output'))
 
     j = 0
-    sm_st = secondary_movie_files[j]['synchronize_time']
-    sm_path = secondary_movie_files[j]['file_path']
-    for i, base_movie in enumerate(base_movie_files):
-        bm_st = base_movie['synchronize_time']
-        bm_duration = base_movie['duration']
+    sm_st = secondary_clips[j]['synchronize_time']
+    sm_path = secondary_clips[j]['file_path']
+    for i, base_clip in enumerate(base_clips):
+        bm_st = base_clip['synchronize_time']
+        bm_duration = base_clip['duration']
 
-        while bm_st > sm_st + secondary_movie_files[j]['duration']:
+        while bm_st > sm_st + secondary_clips[j]['duration']:
             j += 1
-            if j < len(secondary_movie_files):
-                sm_st = secondary_movie_files[j]['synchronize_time']
-                sm_path = secondary_movie_files[j]['file_path']
+            if j < len(secondary_clips):
+                sm_st = secondary_clips[j]['synchronize_time']
+                sm_path = secondary_clips[j]['file_path']
 
-        if not j < len(secondary_movie_files):
-            break
-
-        if bm_st + bm_duration < sm_st:
-            shutil.copyfile(BLANK_MOVIE_PATH, os.path.join(os.path.join(secondary_directory, get_sync_name(i, '.mp4'))))
+        if not j < len(secondary_clips) or bm_st + bm_duration < sm_st:
+            shutil.copyfile(BLANK_MOVIE_PATH, os.path.join(os.path.join(secondary_directory, 'output', get_sync_name(i, '.mp4'))))
         elif bm_st < sm_st and bm_st + bm_duration > sm_st:
             subclip_duration = to_ffmpeg_duration(bm_st + bm_duration - sm_st)
-            subclip_name = os.path.join(secondary_directory, get_sync_name(i, os.path.splitext(sm_path)[1]))
+            subclip_name = os.path.join(secondary_directory, 'output', get_sync_name(i, os.path.splitext(sm_path)[1]))
             sub_proc = subprocess.Popen(['ffmpeg', '-y', '-ss', '00:00:00', '-i', sm_path, '-c', 'copy', '-t', subclip_duration, subclip_name])
             sub_proc.wait()
         else:
             subclip_duration = to_ffmpeg_duration(bm_duration)
             subclip_start_time = to_ffmpeg_duration(bm_st - sm_st)
-            subclip_name = os.path.join(secondary_directory, get_sync_name(i, os.path.splitext(sm_path)[1]))
+            subclip_name = os.path.join(secondary_directory, 'output', get_sync_name(i, os.path.splitext(sm_path)[1]))
             sub_proc = subprocess.Popen(['ffmpeg', '-y', '-ss', subclip_start_time, '-i', sm_path, '-c', 'copy', '-t', subclip_duration, subclip_name])
             sub_proc.wait()
-
-
-def to_ffmpeg_duration(duration):
-    hours = int(duration // 3600)
-    minutes = int((duration - (hours * 3600)) // 60)
-    seconds = duration % 60
-    return f'{hours}:{minutes}:{seconds}'
-
 
 
 if __name__ == '__main__':
@@ -218,8 +150,8 @@ if __name__ == '__main__':
         option = sys.argv[7]
 
         if option.upper() == 'SYNC_CUT_DIRS':
-            synchronize_cut_folders(base_directory, base_sync_index, base_offset,
-                                    secondary_directory, secondary_sync_index, secondary_offset)
+            auto_sync_cut_folders(base_directory, base_sync_index, base_offset,
+                                  secondary_directory, secondary_sync_index, secondary_offset)
         elif option.upper() == 'AUTO_CUT_SEC':
             auto_cut_secondary(base_directory, base_sync_index, base_offset,
                                     secondary_directory, secondary_sync_index, secondary_offset)
