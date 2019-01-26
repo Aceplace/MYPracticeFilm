@@ -164,23 +164,35 @@ def auto_cut_secondary(base_directory, base_synchronize_index, base_offset,
     base_movie_files, secondary_movie_files = movie_from_directories(base_directory, base_synchronize_index, base_offset,
                                                             secondary_directory, secondary_synchronize_index, secondary_offset)
 
+    j = 0
+    sm_st = secondary_movie_files[j]['synchronize_time']
+    sm_path = secondary_movie_files[j]['file_path']
     for i, base_movie in enumerate(base_movie_files):
         bm_st = base_movie['synchronize_time']
         bm_duration = base_movie['duration']
-        sm_st = secondary_movie_files[0]['synchronize_time']
-        sm_path = secondary_movie_files[0]['file_path']
+
+        while bm_st > sm_st + secondary_movie_files[j]['duration']:
+            j += 1
+            if j < len(secondary_movie_files):
+                sm_st = secondary_movie_files[j]['synchronize_time']
+                sm_path = secondary_movie_files[j]['file_path']
+
+        if not j < len(secondary_movie_files):
+            break
 
         if bm_st + bm_duration < sm_st:
             shutil.copyfile(BLANK_MOVIE_PATH, os.path.join(os.path.join(secondary_directory, get_sync_name(i, '.mp4'))))
         elif bm_st < sm_st and bm_st + bm_duration > sm_st:
             subclip_duration = to_ffmpeg_duration(bm_st + bm_duration - sm_st)
             subclip_name = os.path.join(secondary_directory, get_sync_name(i, os.path.splitext(sm_path)[1]))
-            subprocess.Popen(['ffmpeg', '-y', '-ss', '00:00:00', '-i', sm_path, '-c', 'copy', '-t', subclip_duration, subclip_name])
+            sub_proc = subprocess.Popen(['ffmpeg', '-y', '-ss', '00:00:00', '-i', sm_path, '-c', 'copy', '-t', subclip_duration, subclip_name])
+            sub_proc.wait()
         else:
             subclip_duration = to_ffmpeg_duration(bm_duration)
             subclip_start_time = to_ffmpeg_duration(bm_st - sm_st)
             subclip_name = os.path.join(secondary_directory, get_sync_name(i, os.path.splitext(sm_path)[1]))
-            subprocess.Popen(['ffmpeg', '-y', '-ss', subclip_start_time, '-i', sm_path, '-c', 'copy', '-t', subclip_duration, subclip_name])
+            sub_proc = subprocess.Popen(['ffmpeg', '-y', '-ss', subclip_start_time, '-i', sm_path, '-c', 'copy', '-t', subclip_duration, subclip_name])
+            sub_proc.wait()
 
 
 def to_ffmpeg_duration(duration):
