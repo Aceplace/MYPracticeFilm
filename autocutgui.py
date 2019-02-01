@@ -137,7 +137,7 @@ class AutocutGui(tk.Frame):
         self.secondary_clips_frame.grid(row=0, column=1)
 
         # Buttons to perform autocuts
-        match_and_rename_btn = tk.Buton(self, text='Match and Rename',
+        match_and_rename_btn = tk.Button(self, text='Match and Rename',
                                         command=lambda : self.match('RENAME_AND_PAD'))
         match_and_rename_btn.grid(row=2, column=0, columnspan=2, sticky='WE')
         match_and_copy_btn = tk.Button(self, text='Match and Copy',
