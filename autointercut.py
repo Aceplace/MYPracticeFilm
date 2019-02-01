@@ -58,7 +58,7 @@ def get_sync_name(index, extension):
         return f'aic0{index}{extension}'
     else:
         return f'aic{index}{extension}'
-    
+
 
 def auto_sync_cut_folders(base_directory, base_synchronize_index, base_offset,
                           secondary_directory, secondary_synchronize_index, secondary_offset, option='RENAME_AND_PAD'):
@@ -119,17 +119,19 @@ def auto_cut_secondary(base_directory, base_synchronize_index, base_offset,
             if j < len(secondary_clips):
                 sm_st = secondary_clips[j]['synchronize_time']
                 sm_path = secondary_clips[j]['file_path']
+            else:
+                break
 
         if not j < len(secondary_clips) or bm_st + bm_duration < sm_st:
             shutil.copyfile(BLANK_MOVIE_PATH, os.path.join(os.path.join(secondary_directory, 'output', get_sync_name(i, '.mp4'))))
         elif bm_st < sm_st and bm_st + bm_duration > sm_st:
-            subclip_duration = to_ffmpeg_duration(bm_st + bm_duration - sm_st)
+            subclip_duration = to_ffmpeg_duration(bm_st + bm_duration - sm_st + 1)
             subclip_name = os.path.join(secondary_directory, 'output', get_sync_name(i, os.path.splitext(sm_path)[1]))
             sub_proc = subprocess.Popen(['ffmpeg', '-y', '-ss', '00:00:00', '-i', sm_path, '-c', 'copy', '-t', subclip_duration, subclip_name])
             sub_proc.wait()
         else:
-            subclip_duration = to_ffmpeg_duration(bm_duration)
-            subclip_start_time = to_ffmpeg_duration(bm_st - sm_st)
+            subclip_duration = to_ffmpeg_duration(bm_duration + 2)
+            subclip_start_time = to_ffmpeg_duration(bm_st - sm_st - 1) if bm_st - sm_st - 1 > 0 else to_ffmpeg_duration(bm_st - sm_st)
             subclip_name = os.path.join(secondary_directory, 'output', get_sync_name(i, os.path.splitext(sm_path)[1]))
             sub_proc = subprocess.Popen(['ffmpeg', '-y', '-ss', subclip_start_time, '-i', sm_path, '-c', 'copy', '-t', subclip_duration, subclip_name])
             sub_proc.wait()
