@@ -8,6 +8,7 @@ from autointercututils import *
 
 BLANK_MOVIE_PATH = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'blank.mp4')
 
+
 class VideoClipGroup:
     def __init__(self, directory, base_synchronize_index=0, base_offset=0):
         self.directory = directory
@@ -127,14 +128,31 @@ def auto_cut_secondary(base_directory, base_synchronize_index, base_offset,
         elif bm_st < sm_st and bm_st + bm_duration > sm_st:
             subclip_duration = to_ffmpeg_duration(bm_st + bm_duration - sm_st + 1)
             subclip_name = os.path.join(secondary_directory, 'output', get_sync_name(i, os.path.splitext(sm_path)[1]))
-            sub_proc = subprocess.Popen(['ffmpeg', '-y', '-ss', '00:00:00', '-i', sm_path, '-c', 'copy', '-t', subclip_duration, subclip_name])
+            sub_proc = subprocess.Popen(['ffmpeg', '-y', '-ss', '00:00:00', '-i', sm_path, '-c', 'copy',
+                                         '-t', subclip_duration, subclip_name])
             sub_proc.wait()
         else:
             subclip_duration = to_ffmpeg_duration(bm_duration + 2)
             subclip_start_time = to_ffmpeg_duration(bm_st - sm_st - 1) if bm_st - sm_st - 1 > 0 else to_ffmpeg_duration(bm_st - sm_st)
             subclip_name = os.path.join(secondary_directory, 'output', get_sync_name(i, os.path.splitext(sm_path)[1]))
-            sub_proc = subprocess.Popen(['ffmpeg', '-y', '-ss', subclip_start_time, '-i', sm_path, '-c', 'copy', '-t', subclip_duration, subclip_name])
+            sub_proc = subprocess.Popen(['ffmpeg', '-y', '-ss', subclip_start_time, '-i', sm_path, '-c', 'copy',
+                                         '-t', subclip_duration, subclip_name])
             sub_proc.wait()
+
+
+def cut_clip_into_subclips(file_path, mark_time_pairs):
+    file_path = os.path.abspath(file_path)
+    directory = os.path.dirname(file_path)
+    if not os.path.exists(os.path.join(directory, 'qcoutput')):
+        os.makedirs(os.path.join(directory, 'qcoutput'))
+
+    for i, mark_time_pair in enumerate(mark_time_pairs):
+        print(mark_time_pair)
+        subclip_name = os.path.join(directory, 'qcoutput', get_sync_name(i, os.path.splitext(file_path)[1]))
+        sub_proc = subprocess.Popen(['ffmpeg', '-y', '-ss', mark_time_pair[0], '-i', file_path, '-c', 'copy', '-t',
+                                     mark_time_pair[1], subclip_name])
+        sub_proc.wait()
+
 
 
 if __name__ == '__main__':

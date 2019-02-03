@@ -8,12 +8,6 @@ from autointercut import VideoClipGroup, auto_sync_cut_folders, auto_cut_seconda
 from PIL import Image, ImageTk
 
 
-def to_ffmpeg_duration(duration):
-    hours = int(duration // 3600)
-    minutes = int((duration - (hours * 3600)) // 60)
-    seconds = duration % 60
-    return f'{hours}:{minutes}:{seconds}'
-
 
 class ClipGroupFrame(tk.Frame):
     def __init__(self, root, clip_label):

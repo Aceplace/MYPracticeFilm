@@ -5,25 +5,10 @@ import subprocess
 import tkinter as tk
 import TkinterDnD2 as tkdnd
 import bisect
-from autointercut import VideoClipGroup, auto_sync_cut_folders, auto_cut_secondary
+from autointercututils import to_ffmpeg_duration, pairs
+from autointercut import cut_clip_into_subclips
 from PIL import Image, ImageTk
 
-
-def to_ffmpeg_duration(duration):
-    hours = int(duration // 3600)
-    minutes = int((duration - (hours * 3600)) // 60)
-    seconds = duration % 60
-    return f'{hours}:{minutes}:{seconds}'
-
-
-def pairs(seq):
-    it = iter(seq)
-    i = next(it, None)
-    j = next(it, None)
-    while i != None:
-        yield i, j
-        i = next(it, None)
-        j = next(it, None)
 
 
 class QuickCutGui(tk.Frame):
@@ -61,14 +46,16 @@ class QuickCutGui(tk.Frame):
         self.subclip_lb = tk.Listbox(subclip_lb_frame, xscrollcommand=x_scroll.set, yscrollcommand=y_scroll.set,
                                        exportselection=False)
         self.subclip_lb.grid(row=1, column=0, sticky='NS')
-        tk.Button(subclip_lb_frame, text='Delete subclip', command=self.delete_subclip).grid(row=3, column=0)
         x_scroll.config(command=self.subclip_lb.xview)
         y_scroll.config(command=self.subclip_lb.yview)
+        tk.Button(subclip_lb_frame, text='Delete subclip', command=self.delete_subclip_marks).grid(row=3, column=0)
+        tk.Button(subclip_lb_frame, text='Produce subclips', command=self.produce_subclips).grid(row=4, column=0)
 
 
     def get_file(self, event):
         self.current_seek_time = 0
         self.current_clip_path = None
+        self.marks = []
         file_path = event.data
         match = re.fullmatch('{.*}', event.data)
         if match:
@@ -151,7 +138,7 @@ class QuickCutGui(tk.Frame):
         self.update_clip_panel()
         self.update_subclip_lb()
 
-    def delete_subclip(self):
+    def delete_subclip_marks(self):
         index = self.subclip_lb.curselection()[0]
         index *= 2
         if index < len(self.marks) - 1:
@@ -159,6 +146,15 @@ class QuickCutGui(tk.Frame):
         else:
             del self.marks[index]
         self.update_subclip_lb()
+
+    def produce_subclips(self):
+        if len(self.marks) < 2:
+            return
+
+        mark_time_pairs = [(to_ffmpeg_duration(i), to_ffmpeg_duration(j-i)) for i, j in pairs(self.marks) if j != None]
+        print(mark_time_pairs)
+        cut_clip_into_subclips(self.current_clip_path, mark_time_pairs)
+
 
     def seek_time_status(self):
         for i,j in pairs(self.marks):

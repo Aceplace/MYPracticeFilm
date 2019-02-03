@@ -11,6 +11,23 @@ SUPPORTED_EXTENSIONS = ['.MTS', '.MP4']
 DATETIME_TAGS = ['DateTimeOriginal', 'CreateDate']
 
 
+def to_ffmpeg_duration(duration):
+    hours = int(duration // 3600)
+    minutes = int((duration - (hours * 3600)) // 60)
+    seconds = duration % 60
+    return f'{hours}:{minutes}:{seconds}'
+
+
+def pairs(seq):
+    it = iter(seq)
+    i = next(it, None)
+    j = next(it, None)
+    while i != None:
+        yield i, j
+        i = next(it, None)
+        j = next(it, None)
+
+
 def to_seconds(relative_delta):
     return relative_delta.seconds + relative_delta.minutes * 60 + relative_delta.hours * 3600
 
